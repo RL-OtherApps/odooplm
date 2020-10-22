@@ -50,12 +50,12 @@ class MrpBomLineExtension(models.Model):
         """
         bom_obj = self.env['mrp.bom']
         for bom_line in self:
-            for bom_id in self.search(
+            for bom_id in bom_obj.search(
                     [('product_id', '=', bom_line.product_id.id),
                      ('product_tmpl_id', '=', bom_line.product_id.product_tmpl_id.id),
                      ('type', '=', bom_line.type)]
             ):
-                child_bom = bom_obj.browse(bom_id)
+                child_bom = bom_obj.browse(bom_id.id)
                 for child_bom_line in child_bom.bom_line_ids:
                     child_bom_line._get_child_bom_lines()
                 self.child_line_ids = [x.id for x in child_bom.bom_line_ids]
@@ -163,7 +163,7 @@ class MrpBomLineExtension(models.Model):
                              string=_("Status"),
                              help=_("The status of the product in its LifeCycle."),
                              store=False)
-    description = fields.Char(related="product_id.name",
+    description = fields.Text(related="product_id.description",
                               string=_("Description"),
                               store=False)
     weight_net = fields.Float(related="product_id.weight",
@@ -172,7 +172,7 @@ class MrpBomLineExtension(models.Model):
     create_date = fields.Datetime(_('Creation Date'),
                                   readonly=True)
     source_id = fields.Many2one('ir.attachment',
-                                'name',
+                                'Source ID',
                                 ondelete='no action',
                                 readonly=True,
                                 index=True,

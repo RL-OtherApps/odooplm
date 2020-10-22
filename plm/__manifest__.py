@@ -20,7 +20,7 @@
 ##############################################################################
 {
     'name': 'Product Lifecycle Management',
-    'version': '12.0.1',
+    'version': '12.0.2',
     'author': 'OmniaSolutions',
     'website': 'https://www.omniasolutions.website',
     'category': 'Product Lifecycle Management',
@@ -88,6 +88,7 @@ Supported Editors :
             'views/plm_material_view.xml',
             'views/product_product.xml',
             'views/product_template.xml',
+            'views/plm_cad_open.xml',
             'views/sequence.xml',
             'views/menu.xml',
             # Reports Template

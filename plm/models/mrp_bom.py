@@ -26,7 +26,7 @@ Created on 25 Aug 2016
 """
 import logging
 import sys
-
+import datetime
 import odoo.addons.decimal_precision as dp
 from odoo import models
 from odoo import fields
@@ -72,7 +72,7 @@ class MrpBomExtension(models.Model):
                              string=_("Status"),
                              help=_("The status of the product in its LifeCycle."),
                              store=False)
-    description = fields.Char(related="product_tmpl_id.name",
+    description = fields.Text(related="product_tmpl_id.description",
                               string=_("Description"),
                               store=False)
     father_complete_ids = fields.Many2many('mrp.bom',
@@ -82,7 +82,7 @@ class MrpBomExtension(models.Model):
     create_date = fields.Datetime(_('Creation Date'),
                                   readonly=True)
     source_id = fields.Many2one('ir.attachment',
-                                'name',
+                                'Source ID',
                                 ondelete='no action',
                                 readonly=True,
                                 index=True,
@@ -740,8 +740,10 @@ class MrpBomExtension(models.Model):
             product_tmpl_id = parent_product_product_id.product_tmpl_id.id
             ir_attachment_relation.removeChildRelation(parent_ir_attachment_id)  # perform default unlink to HiTree, need to perform RfTree also
             mrp_bom_found_id = self.env['mrp.bom']
-            for mrp_bom_id in self.search([('product_tmpl_id', '=', product_tmpl_id)]):
+            for mrp_bom_id in self.search([('product_tmpl_id', '=', product_tmpl_id),
+                                           ('type', '=', bomType)]):
                 mrp_bom_found_id = mrp_bom_id
+                break
             if not mrp_bom_found_id:
                 if product_tmpl_id:
                     mrp_bom_found_id = self.create({'product_tmpl_id': product_tmpl_id,
@@ -777,6 +779,8 @@ class MrpBomExtension(models.Model):
                                                                          self.env['ir.attachment'].browse(l_tree_document_id))
             if not mrp_bom_found_id.bom_line_ids:
                 mrp_bom_found_id.unlink()
+            else:
+                mrp_bom_found_id.write({'write_date': datetime.datetime.now()})
             return True
         except Exception as ex:
             logging.error(ex)

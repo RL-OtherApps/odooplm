@@ -39,8 +39,9 @@ class PlmBackupDocument(models.Model):
     """
         Only administrator is allowed to remove elements by this table
     """
-    _name = 'plm.backupdoc'
+    _name = 'plm.backupdoc' # plm_backupdoc
     _description = "manage your document back up"
+    _order = 'id DESC'
 
     userid = fields.Many2one('res.users',
                              _('Related User'))
@@ -93,6 +94,14 @@ class PlmBackupDocument(models.Model):
                     logging.warning('Prevent to delete the active File %r' % currentname)
                     continue
             super(PlmBackupDocument, plm_backup_document_id).unlink()
+
+    @api.model
+    def getLastBckDocumentByUser(self, doc_id):
+        for obj in self.search([
+            ('documentid', '=', doc_id.id)
+            ], order='create_date DESC', limit=1):
+            return obj
+        return self
 
 
 class BackupDocWizard(osv.osv.osv_memory):

@@ -596,18 +596,23 @@ class PlmComponent(models.Model):
     @api.multi
     def checkWorkflow(self, docInError, linkeddocuments, check_state):
         docIDs = []
-        attachment = self.env['ir.attachment']
-        for documentBrws in linkeddocuments:
-            if documentBrws.state == check_state:
-                if documentBrws.is_checkout:
-                    docInError.append(_("Document %r : %r is checked out by user %r") % (documentBrws.name, documentBrws.revisionid, documentBrws.checkout_user))
-                    continue
-                docIDs.append(documentBrws.id)
-                if documentBrws.is3D():
-                    doc_layout_ids = documentBrws.getRelatedLyTree(documentBrws.id)
-                    docIDs.extend(self.checkWorkflow(docInError, attachment.browse(doc_layout_ids), check_state))
-                    raw_doc_ids = documentBrws.getRelatedRfTree(documentBrws.id, recursion=True)
-                    docIDs.extend(self.checkWorkflow(docInError, attachment.browse(raw_doc_ids), check_state))
+        def _checkWorkflow(docInError, linkeddocuments, check_state):
+            attachment = self.env['ir.attachment']
+            for documentBrws in linkeddocuments:
+                if documentBrws.state == check_state:
+                    if documentBrws.is_checkout:
+                        docInError.append(_("Document %r : %r is checked out by user %r") % (documentBrws.name, documentBrws.revisionid, documentBrws.checkout_user))
+                        continue
+                    new_doc_id = documentBrws.id
+                    if new_doc_id in docIDs:
+                        continue
+                    docIDs.append(new_doc_id)
+                    if documentBrws.is3D():
+                        doc_layout_ids = documentBrws.getRelatedLyTree(new_doc_id)
+                        _checkWorkflow(docInError, attachment.browse(doc_layout_ids), check_state)
+                        raw_doc_ids = documentBrws.getRelatedRfTree(documentBrws.id, recursion=True)
+                        _checkWorkflow(docInError, attachment.browse(raw_doc_ids), check_state)
+        _checkWorkflow(docInError, linkeddocuments, check_state)
         return list(set(docIDs))
         
     @api.multi
@@ -676,7 +681,10 @@ class PlmComponent(models.Model):
         """
         if not (body == ''):
             for comp_obj in self:
-                comp_obj.sudo().message_post(body=_(body))
+                try:
+                    comp_obj.message_post(body=_(body))
+                except:
+                    comp_obj.sudo().message_post(body=_(body))
 
     @api.multi
     def unlink(self):
@@ -708,7 +716,7 @@ class PlmComponent(models.Model):
             defaults['state'] = status
             exclude_statuses = ['draft', 'released', 'undermodify', 'obsoleted']
             include_statuses = ['confirmed']
-            comp_obj.commonWFAction(status, action, doc_action, defaults, exclude_statuses, include_statuses)
+            comp_obj.commonWFAction(status, action, doc_action, defaults, exclude_statuses, include_statuses, recursive=False)
         return True
 
     @api.multi
@@ -755,7 +763,7 @@ class PlmComponent(models.Model):
                     defaults['engineering_writable'] = False
                     defaults['state'] = 'obsoleted'
                     old_revision.product_tmpl_id.write(defaults)
-                    old_revision.wf_message_post(body=_('Status moved to: %s.' % (USE_DIC_STATES[defaults['state']])))
+                    old_revision.wf_message_post(body=_('Status moved to: %s by %s.' % (USE_DIC_STATES[defaults['state']], self.env.user.name)))
             defaults['engineering_writable'] = False
             defaults['state'] = 'released'
             self.browse(product_ids)._action_ondocuments('release')
@@ -769,7 +777,7 @@ class PlmComponent(models.Model):
             objId = prodTmplType.browse(product_tmpl_ids).write(defaults)
             comp_obj.write(defaults)
             if (objId):
-                self.browse(product_ids).wf_message_post(body=_('Status moved to: %s.' % (USE_DIC_STATES[defaults['state']])))
+                self.browse(product_ids).wf_message_post(body=_('Status moved to: %s by %s.' % (USE_DIC_STATES[defaults['state']], self.env.user.name)))
             return objId
         return False
 
@@ -817,12 +825,14 @@ class PlmComponent(models.Model):
         return toCall()
 
     @api.multi
-    def commonWFAction(self, status, action, doc_action, defaults=[], exclude_statuses=[], include_statuses=[]):
+    def commonWFAction(self, status, action, doc_action, defaults=[], exclude_statuses=[], include_statuses=[], recursive=True):
         product_product_ids = []
         product_template_ids = []
-        userErrors, allIDs = self._get_recursive_parts(exclude_statuses, include_statuses)
-        if userErrors:
-            raise UserError(userErrors)
+        allIDs = [self.id]
+        if recursive:
+            userErrors, allIDs = self._get_recursive_parts(exclude_statuses, include_statuses)
+            if userErrors:
+                raise UserError(userErrors)
         allIdsBrwsList = self.browse(allIDs)
         allIdsBrwsList._action_ondocuments(doc_action)
         for currId in allIdsBrwsList:
@@ -833,7 +843,7 @@ class PlmComponent(models.Model):
             self.browse(product_product_ids).perform_action(action)
         objId = self.env['product.template'].browse(product_template_ids).write(defaults)
         if objId:
-            self.browse(allIDs).wf_message_post(body=_('Status moved to: %s.' % (USE_DIC_STATES[defaults['state']])))
+            self.browse(allIDs).wf_message_post(body=_('Status moved to: %s by %s.' % (USE_DIC_STATES[defaults['state']], self.env.user.name)))
         return objId
 
 #  ######################################################################################################################################33
@@ -903,7 +913,7 @@ class PlmComponent(models.Model):
 
     @api.model
     def checkVariantLinkeddocs(self, doc_ids):
-        for doc in self.env['plm.document'].browse(doc_ids):
+        for doc in self.env['ir.attachment'].browse(doc_ids):
             if not doc.ischecked_in():
                 raise UserError(_('Document %r with revision %r is in check-out, cannot create variant.' % (doc.name, doc.revisionid)))
 
@@ -1045,11 +1055,12 @@ Please try to contact OmniaSolutions to solve this error, or install Plm Sale Fi
     def _checkMany2oneClient(self, obj, vals, force_create=False):
         out = {}
         customFields = [field.replace('plm_m2o_', '') for field in vals.keys() if field.startswith('plm_m2o_')]
-        fieldsGet = obj.fields_get(customFields)
-        for fieldName, fieldDefinition in fieldsGet.items():
-            refId = self.customFieldConvert(fieldDefinition, vals, fieldName, force_create=force_create)
-            if refId:
-                out[fieldName] = refId.id
+        if customFields:
+            fieldsGet = obj.fields_get(customFields)
+            for fieldName, fieldDefinition in fieldsGet.items():
+                refId = self.customFieldConvert(fieldDefinition, vals, fieldName, force_create=force_create)
+                if refId:
+                    out[fieldName] = refId.id
         return out
 
     @api.multi
@@ -1059,7 +1070,7 @@ Please try to contact OmniaSolutions to solve this error, or install Plm Sale Fi
         referredModel = fieldDefinition.get('relation', '')
         oldFieldName = 'plm_m2o_' + fieldName
         cadVal = vals.get(oldFieldName, '')
-        if fieldType == 'many2one':
+        if fieldType == 'many2one' and cadVal:
             try:
                 for refId in self.env[referredModel].search([('name', '=', cadVal)]):
                     return refId
@@ -1148,7 +1159,7 @@ Please try to contact OmniaSolutions to solve this error, or install Plm Sale Fi
                 oldProdVals = {'engineering_writable': False,
                                'state': 'undermodify'}
                 self.browse([oldObject.id]).sudo().write(oldProdVals)
-                oldObject.wf_message_post(body=_('Status moved to: %s.' % (USE_DIC_STATES[oldProdVals['state']])))
+                oldObject.wf_message_post(body=_('Status moved to: %s by %s.' % (USE_DIC_STATES[oldProdVals['state']], self.env.user.name)))
                 # store updated infos in "revision" object
                 defaults = {}
                 defaults['name'] = oldObject.name                 # copy function needs an explicit name value
@@ -1643,7 +1654,7 @@ Please try to contact OmniaSolutions to solve this error, or install Plm Sale Fi
                 'context': {}}
 
     @api.model
-    def createFromProps(self, productAttribute):
+    def createFromProps(self, productAttribute, ir_attachment_id=False):
         out_product_produc_id = self.env['product.product']
         found = False
         engineering_name = productAttribute.get('engineering_code', False)
@@ -1658,11 +1669,31 @@ Please try to contact OmniaSolutions to solve this error, or install Plm Sale Fi
             found = True
             break
         if found:  # Write
-            if product_produc_id.state not in ['released', 'obsoleted']:
-                out_product_produc_id.write(productAttribute)
+            checkOutByMe = True
+            if ir_attachment_id:
+                checkOutByMe, _username = ir_attachment_id.checkoutByMeWithUser()
+            if checkOutByMe:
+                if product_produc_id.state not in ['released', 'obsoleted']:
+                    out_product_produc_id.write(productAttribute)
         else:  # write
             out_product_produc_id = self.create(productAttribute)
         return out_product_produc_id
+
+    @api.multi
+    def name_get(self):
+        result = []
+        for prod in self:
+            eng_code = '[%s] ' % (prod.default_code or '%s_%s' % (prod.engineering_code, prod.engineering_revision))
+            eng_code += prod.name
+            result.append((prod.id, eng_code))
+        return result
+
+    @api.model
+    def _name_search(self, name, args=None, operator='ilike', limit=100, name_get_uid=None):
+        product_ids = self._search([('engineering_code', operator, name)] + args, limit=limit, access_rights_uid=name_get_uid)
+        ret = self.browse(product_ids).name_get()
+        ret += super(PlmComponent, self)._name_search(name, args, operator, limit, name_get_uid)
+        return ret
 
 
 class PlmTemporayMessage(osv.osv.osv_memory):
